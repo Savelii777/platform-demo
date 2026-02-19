@@ -6,7 +6,7 @@ import {
   MessageSquare, Tag, Shield, Zap, Building2, UserCheck,
   Package, Car, ChevronDown, Award, TrendingUp, Clock
 } from "lucide-react";
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 
 const STATS = [
   { value: 12000, suffix: "+", label: "Специалистов" },
@@ -14,6 +14,9 @@ const STATS = [
   { value: 48, suffix: "", label: "Городов" },
   { value: 35000, suffix: "+", label: "Клиентов" },
 ];
+
+const TOTAL_FRAMES = 61;
+const FRAME_PATH = (i: number) => `/hero-frames/frame-${String(i).padStart(3, "0")}.jpg`;
 
 /* ── Scroll reveal ── */
 function Reveal({ children, delay = 0, className = "" }: { children: ReactNode; delay?: number; className?: string }) {
@@ -62,43 +65,71 @@ function Counter({ to, suffix = "" }: { to: number; suffix?: string }) {
    Page
    ══════════════════════════════════════════ */
 export default function HomePage() {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const heroRef = useRef<HTMLElement>(null);
+  const framesRef = useRef<HTMLImageElement[]>([]);
+  const currentFrameRef = useRef(0);
   const [mounted, setMounted] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   useEffect(() => { const t = setTimeout(() => setMounted(true), 100); return () => clearTimeout(t); }, []);
 
-  // Scroll-driven video
+  // Preload all frames
   useEffect(() => {
-    const video = videoRef.current;
+    const imgs: HTMLImageElement[] = [];
+    let loaded = 0;
+    for (let i = 1; i <= TOTAL_FRAMES; i++) {
+      const img = new Image();
+      img.src = FRAME_PATH(i);
+      img.onload = () => {
+        loaded++;
+        if (loaded === 1) drawFrame(0); // draw first frame immediately
+      };
+      imgs.push(img);
+    }
+    framesRef.current = imgs;
+  }, []);
+
+  const drawFrame = useCallback((index: number) => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    const img = framesRef.current[index];
+    if (!canvas || !ctx || !img || !img.complete) return;
+    if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+    }
+    ctx.drawImage(img, 0, 0);
+  }, []);
+
+  // Scroll-driven frame sequence
+  useEffect(() => {
     const hero = heroRef.current;
-    if (!video || !hero) return;
-    let target = 0, raf = 0;
-    const seek = () => {
-      if (!video.duration || !isFinite(video.duration)) { raf = requestAnimationFrame(seek); return; }
-      const diff = target - video.currentTime;
-      if (Math.abs(diff) > 0.01) video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + diff * 0.15));
-      raf = requestAnimationFrame(seek);
-    };
+    if (!hero) return;
+    let raf = 0;
+
     const onScroll = () => {
       const r = hero.getBoundingClientRect();
       const p = Math.max(0, Math.min(1, -r.top / (hero.offsetHeight - window.innerHeight)));
-      if (video.duration && isFinite(video.duration)) target = p * video.duration;
+      const frameIndex = Math.min(TOTAL_FRAMES - 1, Math.floor(p * TOTAL_FRAMES));
+      if (frameIndex !== currentFrameRef.current) {
+        currentFrameRef.current = frameIndex;
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => drawFrame(frameIndex));
+      }
     };
-    const ready = () => { video.pause(); onScroll(); raf = requestAnimationFrame(seek); };
-    video.addEventListener("canplaythrough", ready);
+
     window.addEventListener("scroll", onScroll, { passive: true });
-    if (video.readyState >= 3) ready();
-    return () => { cancelAnimationFrame(raf); video.removeEventListener("canplaythrough", ready); window.removeEventListener("scroll", onScroll); };
-  }, []);
+    onScroll();
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("scroll", onScroll); };
+  }, [drawFrame]);
 
   return (
     <div>
       {/* ── HERO ── */}
       <section ref={heroRef} className="relative min-h-[200vh]">
         <div className="sticky top-0 h-screen overflow-hidden">
-          <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover" src="/hero.mp4" muted playsInline preload="auto" />
+          <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-cover" />
           <div className="absolute inset-0 bg-background/70" />
           <div className="absolute bottom-0 left-0 right-0 h-1/3 bg-gradient-to-t from-background to-transparent" />
 
